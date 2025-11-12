@@ -105,11 +105,14 @@ func (r *MyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
         return ctrl.Result{}, err
     }
     
-    // Prune stale resources and finalize
-    result, err := pruner.Prune(ctx, func(ctx context.Context) error {
-        return r.Status().Update(ctx, &myCR)
-    })
+    // Prune stale resources
+    result, err := pruner.Prune(ctx)
     if err != nil {
+        return ctrl.Result{}, err
+    }
+    
+    // Update status to persist changes
+    if err := r.Status().Update(ctx, &myCR); err != nil {
         return ctrl.Result{}, err
     }
     
@@ -197,9 +200,14 @@ for _, obj := range desired {
     _ = pruner.MarkReconciled(obj)
 }
 
-result, err := pruner.Prune(ctx, func(ctx context.Context) error {
-    return client.Status().Update(ctx, &myCR)
-})
+result, err := pruner.Prune(ctx)
+if err != nil {
+    return ctrl.Result{}, err
+}
+
+// Update status
+_ = client.Status().Update(ctx, &myCR)
+
 // result.Skipped contains resources that would be deleted
 // result.Pruned is empty
 ```
@@ -244,11 +252,9 @@ func NewPruner(
 // Mark a resource as reconciled (desired) for this session
 func (p *Pruner) MarkReconciled(obj client.Object) error
 
-// Prune stale resources and finalize
-func (p *Pruner) Prune(
-    ctx context.Context,
-    updateStatus func(context.Context) error,
-) (*Result, error)
+// Prune stale resources from previous generations
+// Returns Result with list of pruned/skipped resources
+func (p *Pruner) Prune(ctx context.Context) (*Result, error)
 ```
 
 ### ManagedChild
@@ -301,9 +307,14 @@ func TestMyReconciler(t *testing.T) {
     _ = pruner.MarkReconciled(deployment)
     
     // Test pruning behavior
-    result, err := pruner.Prune(context.Background(), func(ctx context.Context) error {
-        return client.Status().Update(ctx, owner)
-    })
+    result, err := pruner.Prune(context.Background())
+    if err != nil {
+        t.Fatal(err)
+    }
+    
+    // Update status
+    _ = client.Status().Update(context.Background(), owner)
+    
     // Your assertions here
 }
 ```

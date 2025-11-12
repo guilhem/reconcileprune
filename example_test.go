@@ -155,18 +155,15 @@ func ExamplePruner_MarkReconciled() {
 	_ = pruner.MarkReconciled(deployment)
 	_ = pruner.MarkReconciled(service)
 
-	// Prune stale resources and finalize
-	result, err := pruner.Prune(
-		context.Background(),
-		func(ctx context.Context) error {
-			return cl.Status().Update(ctx, owner)
-		},
-	)
-
+	// Prune stale resources
+	result, err := pruner.Prune(context.Background())
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return
 	}
+
+	// Update status to persist changes
+	_ = cl.Status().Update(context.Background(), owner)
 
 	fmt.Printf("Pruned: %d resources\n", len(result.Pruned))
 	fmt.Printf("Children tracked: %d\n", len(owner.Status.Children))
@@ -238,9 +235,8 @@ func ExamplePruner_MarkReconciled_withDryRun() {
 		reconcileprune.WithScheme(scheme),
 	)
 	_ = pruner1.MarkReconciled(deployment)
-	_, _ = pruner1.Prune(context.Background(), func(ctx context.Context) error {
-		return cl.Status().Update(ctx, owner)
-	})
+	_, _ = pruner1.Prune(context.Background())
+	_ = cl.Status().Update(context.Background(), owner)
 
 	// Second reconcile with dry-run - don't reconcile deployment (it should be pruned)
 	owner.SetGeneration(2)
@@ -249,9 +245,8 @@ func ExamplePruner_MarkReconciled_withDryRun() {
 		reconcileprune.WithDryRun(true),
 	)
 
-	result, _ := pruner2.Prune(context.Background(), func(ctx context.Context) error {
-		return cl.Status().Update(ctx, owner)
-	})
+	result, _ := pruner2.Prune(context.Background())
+	_ = cl.Status().Update(context.Background(), owner)
 
 	fmt.Printf("Skipped (dry-run): %d resources\n", len(result.Skipped))
 	fmt.Printf("Pruned: %d resources\n", len(result.Pruned))
@@ -304,9 +299,8 @@ func ExamplePruner_MarkReconciled_customErrorHandler() {
 	)
 
 	// Example reconciliation...
-	_, _ = pruner.Prune(context.Background(), func(ctx context.Context) error {
-		return cl.Status().Update(ctx, owner)
-	})
+	_, _ = pruner.Prune(context.Background())
+	_ = cl.Status().Update(context.Background(), owner)
 
 	fmt.Println("Reconciliation completed")
 

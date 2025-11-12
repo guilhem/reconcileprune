@@ -115,14 +115,27 @@ func (p *Pruner) MarkReconciled(obj client.Object) error {
 // Must be called after all MarkReconciled() calls.
 // This method prunes resources from previous generations that are no longer desired.
 //
+// The children slice is modified in-place. After Prune() returns successfully,
+// you should update the owner's status subresource to persist the changes.
+//
 // Parameters:
 //   - ctx: Context for the operation
-//   - updateStatus: Callback to update the owner's status subresource
 //
 // Returns:
 //   - Result containing lists of pruned/skipped resources
-//   - error if the operation fails
-func (p *Pruner) Prune(ctx context.Context, updateStatus func(context.Context) error) (*Result, error) {
+//   - error if the pruning operation fails
+//
+// Example:
+//
+//	result, err := pruner.Prune(ctx)
+//	if err != nil {
+//	    return ctrl.Result{}, err
+//	}
+//	// Update status to persist changes
+//	if err := r.Status().Update(ctx, &myCR); err != nil {
+//	    return ctrl.Result{}, err
+//	}
+func (p *Pruner) Prune(ctx context.Context) (*Result, error) {
 	// Get current generation
 	currentGen := p.owner.GetGeneration()
 
@@ -131,17 +144,8 @@ func (p *Pruner) Prune(ctx context.Context, updateStatus func(context.Context) e
 	if currentGen > p.lastAppliedGen {
 		pruneErrors := p.pruneStaleResources(ctx, p.children, p.desiredRefs, p.lastAppliedGen, p.result)
 		if len(pruneErrors) > 0 {
-			err := errors.Join(pruneErrors...)
-			if updateErr := updateStatus(ctx); updateErr != nil {
-				return p.result, fmt.Errorf("failed to update status after prune errors: %w", updateErr)
-			}
-			return p.result, err
+			return p.result, errors.Join(pruneErrors...)
 		}
-	}
-
-	// Success - update status
-	if err := updateStatus(ctx); err != nil {
-		return p.result, fmt.Errorf("failed to update status after successful reconcile: %w", err)
 	}
 
 	return p.result, nil

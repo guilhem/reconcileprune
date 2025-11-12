@@ -136,15 +136,14 @@ func TestPruner_FirstReconcile(t *testing.T) {
 	}
 
 	// Prune and finalize
-	result, err := pruner.Prune(
-		context.Background(),
-		func(ctx context.Context) error {
-			return cl.Status().Update(ctx, owner)
-		},
-	)
-
+	result, err := pruner.Prune(context.Background())
 	if err != nil {
 		t.Fatalf("Prune failed: %v", err)
+	}
+
+	// Update status
+	if err := cl.Status().Update(context.Background(), owner); err != nil {
+		t.Fatalf("Failed to update status: %v", err)
 	}
 
 	if len(result.Pruned) != 0 {
@@ -249,9 +248,7 @@ func TestPruner_SecondReconcileWithPrune(t *testing.T) {
 		t.Fatalf("First MarkReconciled deployment2 failed: %v", err)
 	}
 
-	_, err := pruner.Prune(context.Background(), func(ctx context.Context) error {
-		return cl.Status().Update(ctx, owner)
-	})
+	_, err := pruner.Prune(context.Background())
 	if err != nil {
 		t.Fatalf("First Prune failed: %v", err)
 	}
@@ -270,11 +267,12 @@ func TestPruner_SecondReconcileWithPrune(t *testing.T) {
 		t.Fatalf("Second MarkReconciled deployment2 failed: %v", err)
 	}
 
-	result, err := pruner2.Prune(context.Background(), func(ctx context.Context) error {
-		return cl.Status().Update(ctx, owner)
-	})
+	result, err := pruner2.Prune(context.Background())
 	if err != nil {
 		t.Fatalf("Second Prune failed: %v", err)
+	}
+	if err := cl.Status().Update(context.Background(), owner); err != nil {
+		t.Fatalf("Failed to update status: %v", err)
 	}
 
 	if len(result.Pruned) != 1 {
@@ -357,11 +355,12 @@ func TestPruner_IdempotentReconcile(t *testing.T) {
 		t.Fatalf("First MarkReconciled failed: %v", err)
 	}
 
-	_, err := pruner.Prune(context.Background(), func(ctx context.Context) error {
-		return cl.Status().Update(ctx, owner)
-	})
+	_, err := pruner.Prune(context.Background())
 	if err != nil {
 		t.Fatalf("First Prune failed: %v", err)
+	}
+	if err := cl.Status().Update(context.Background(), owner); err != nil {
+		t.Fatalf("Failed to update status: %v", err)
 	}
 
 	// Second reconcile (same generation)
@@ -372,11 +371,12 @@ func TestPruner_IdempotentReconcile(t *testing.T) {
 		t.Fatalf("Second MarkReconciled failed: %v", err)
 	}
 
-	result2, err := pruner2.Prune(context.Background(), func(ctx context.Context) error {
-		return cl.Status().Update(ctx, owner)
-	})
+	result2, err := pruner2.Prune(context.Background())
 	if err != nil {
 		t.Fatalf("Second Prune failed: %v", err)
+	}
+	if err := cl.Status().Update(context.Background(), owner); err != nil {
+		t.Fatalf("Failed to update status: %v", err)
 	}
 
 	if len(result2.Pruned) != 0 {
@@ -445,11 +445,12 @@ func TestPruner_DryRun(t *testing.T) {
 		t.Fatalf("MarkReconciled failed: %v", err)
 	}
 
-	_, err := prunerNormal.Prune(context.Background(), func(ctx context.Context) error {
-		return cl.Status().Update(ctx, owner)
-	})
+	_, err := prunerNormal.Prune(context.Background())
 	if err != nil {
 		t.Fatalf("Failed to prune: %v", err)
+	}
+	if err := cl.Status().Update(context.Background(), owner); err != nil {
+		t.Fatalf("Failed to update status: %v", err)
 	}
 
 	owner.SetGeneration(2)
@@ -459,11 +460,12 @@ func TestPruner_DryRun(t *testing.T) {
 	)
 
 	// Second reconcile with dry-run (no deployment desired)
-	result, err := prunerDryRun.Prune(context.Background(), func(ctx context.Context) error {
-		return cl.Status().Update(ctx, owner)
-	})
+	result, err := prunerDryRun.Prune(context.Background())
 	if err != nil {
 		t.Fatalf("Dry-run Prune failed: %v", err)
+	}
+	if err := cl.Status().Update(context.Background(), owner); err != nil {
+		t.Fatalf("Failed to update status: %v", err)
 	}
 
 	if len(result.Skipped) != 1 {
@@ -522,11 +524,12 @@ func TestPruner_CustomErrorHandler(t *testing.T) {
 
 	// Just run prune with no children - this won't trigger error handler
 	// but verifies the option is accepted
-	_, err := pruner.Prune(context.Background(), func(ctx context.Context) error {
-		return cl.Status().Update(ctx, owner)
-	})
+	_, err := pruner.Prune(context.Background())
 	if err != nil {
 		t.Fatalf("Prune failed: %v", err)
+	}
+	if err := cl.Status().Update(context.Background(), owner); err != nil {
+		t.Fatalf("Failed to update status: %v", err)
 	}
 
 	// Note: In a real scenario, the error handler would be called when deletion fails
@@ -593,11 +596,12 @@ func TestPruner_ErrorHandlerReturnsError(t *testing.T) {
 	if err := pruner.MarkReconciled(deployment); err != nil {
 		t.Fatalf("MarkReconciled failed: %v", err)
 	}
-	_, err := pruner.Prune(context.Background(), func(ctx context.Context) error {
-		return cl.Status().Update(ctx, owner)
-	})
+	_, err := pruner.Prune(context.Background())
 	if err != nil {
 		t.Fatalf("First Prune failed: %v", err)
+	}
+	if err := cl.Status().Update(context.Background(), owner); err != nil {
+		t.Fatalf("Failed to update status: %v", err)
 	}
 
 	// Second reconcile with error handler that returns error
@@ -616,13 +620,14 @@ func TestPruner_ErrorHandlerReturnsError(t *testing.T) {
 	// This will NOT trigger the error handler since NotFound is ignored
 	_ = cl.Delete(context.Background(), deployment)
 
-	result, err := pruner2.Prune(context.Background(), func(ctx context.Context) error {
-		return cl.Status().Update(ctx, owner)
-	})
+	result, err := pruner2.Prune(context.Background())
 
 	// Should succeed since NotFound is ignored
 	if err != nil {
 		t.Fatalf("Prune should succeed when resource already deleted: %v", err)
+	}
+	if err := cl.Status().Update(context.Background(), owner); err != nil {
+		t.Fatalf("Failed to update status: %v", err)
 	}
 
 	if len(result.Pruned) != 1 {
