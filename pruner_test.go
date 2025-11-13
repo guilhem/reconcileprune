@@ -146,8 +146,8 @@ func TestPruner_FirstReconcile(t *testing.T) {
 		t.Fatalf("Failed to update status: %v", err)
 	}
 
-	if len(result.Pruned) != 0 {
-		t.Errorf("Expected 0 pruned resources on first reconcile, got %d", len(result.Pruned))
+	if len(result) != 0 {
+		t.Errorf("Expected 0 pruned resources on first reconcile, got %d", len(result))
 	}
 
 	if len(owner.Status.Children) != 1 {
@@ -275,8 +275,8 @@ func TestPruner_SecondReconcileWithPrune(t *testing.T) {
 		t.Fatalf("Failed to update status: %v", err)
 	}
 
-	if len(result.Pruned) != 1 {
-		t.Errorf("Expected 1 pruned resource, got %d", len(result.Pruned))
+	if len(result) != 1 {
+		t.Errorf("Expected 1 pruned resource, got %d", len(result))
 	}
 
 	if len(owner.Status.Children) != 1 {
@@ -379,8 +379,8 @@ func TestPruner_IdempotentReconcile(t *testing.T) {
 		t.Fatalf("Failed to update status: %v", err)
 	}
 
-	if len(result2.Pruned) != 0 {
-		t.Errorf("Expected 0 pruned resources on idempotent reconcile, got %d", len(result2.Pruned))
+	if len(result2) != 0 {
+		t.Errorf("Expected 0 pruned resources on idempotent reconcile, got %d", len(result2))
 	}
 }
 
@@ -460,7 +460,7 @@ func TestPruner_DryRun(t *testing.T) {
 	)
 
 	// Second reconcile with dry-run (no deployment desired)
-	result, err := prunerDryRun.Prune(context.Background())
+	pruned, err := prunerDryRun.Prune(context.Background())
 	if err != nil {
 		t.Fatalf("Dry-run Prune failed: %v", err)
 	}
@@ -468,15 +468,12 @@ func TestPruner_DryRun(t *testing.T) {
 		t.Fatalf("Failed to update status: %v", err)
 	}
 
-	if len(result.Skipped) != 1 {
-		t.Errorf("Expected 1 skipped resource in dry-run, got %d", len(result.Skipped))
+	// In dry-run mode with client.DryRunAll, the delete succeeds but doesn't actually remove the resource
+	if len(pruned) != 1 {
+		t.Errorf("Expected 1 pruned resource in dry-run, got %d", len(pruned))
 	}
 
-	if len(result.Pruned) != 0 {
-		t.Errorf("Expected 0 pruned resources in dry-run, got %d", len(result.Pruned))
-	}
-
-	// Verify deployment still exists
+	// Verify deployment still exists (dry-run doesn't actually delete)
 	dep := &appsv1.Deployment{}
 	if err := cl.Get(context.Background(), client.ObjectKey{
 		Namespace: "default",
@@ -630,8 +627,8 @@ func TestPruner_ErrorHandlerReturnsError(t *testing.T) {
 		t.Fatalf("Failed to update status: %v", err)
 	}
 
-	if len(result.Pruned) != 1 {
-		t.Errorf("Expected 1 pruned resource, got %d", len(result.Pruned))
+	if len(result) != 1 {
+		t.Errorf("Expected 1 pruned resource, got %d", len(result))
 	}
 }
 

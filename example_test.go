@@ -165,7 +165,7 @@ func ExamplePruner_MarkReconciled() {
 	// Update status to persist changes
 	_ = cl.Status().Update(context.Background(), owner)
 
-	fmt.Printf("Pruned: %d resources\n", len(result.Pruned))
+	fmt.Printf("Pruned: %d resources\n", len(result))
 	fmt.Printf("Children tracked: %d\n", len(owner.Status.Children))
 
 	// Output:
@@ -245,15 +245,13 @@ func ExamplePruner_MarkReconciled_withDryRun() {
 		reconcileprune.WithDryRun(true),
 	)
 
-	result, _ := pruner2.Prune(context.Background())
+	pruned, _ := pruner2.Prune(context.Background())
 	_ = cl.Status().Update(context.Background(), owner)
 
-	fmt.Printf("Skipped (dry-run): %d resources\n", len(result.Skipped))
-	fmt.Printf("Pruned: %d resources\n", len(result.Pruned))
+	fmt.Printf("Pruned (dry-run): %d resources\n", len(pruned))
 
 	// Output:
-	// Skipped (dry-run): 1 resources
-	// Pruned: 0 resources
+	// Pruned (dry-run): 1 resources
 }
 
 func ExamplePruner_MarkReconciled_customErrorHandler() {

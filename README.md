@@ -106,7 +106,7 @@ func (r *MyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
     }
     
     // Prune stale resources
-    result, err := pruner.Prune(ctx)
+    pruned, err := pruner.Prune(ctx)
     if err != nil {
         return ctrl.Result{}, err
     }
@@ -117,7 +117,7 @@ func (r *MyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
     }
     
     log.Info("Reconciliation complete",
-        "pruned", len(result.Pruned))
+        "pruned", len(pruned))
     
     return ctrl.Result{}, nil
 }
@@ -186,7 +186,8 @@ func (r *MyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 
 ### DryRun Mode
 
-Preview what would be pruned without actually deleting resources:
+Preview what would be pruned without actually deleting resources.
+Uses Kubernetes dry-run to validate deletions:
 
 ```go
 pruner := reconcileprune.NewPruner(client, &myCR, &myCR.Status.Children,
@@ -200,7 +201,7 @@ for _, obj := range desired {
     _ = pruner.MarkReconciled(obj)
 }
 
-result, err := pruner.Prune(ctx)
+pruned, err := pruner.Prune(ctx)
 if err != nil {
     return ctrl.Result{}, err
 }
@@ -208,8 +209,8 @@ if err != nil {
 // Update status
 _ = client.Status().Update(ctx, &myCR)
 
-// result.Skipped contains resources that would be deleted
-// result.Pruned is empty
+// pruned contains ObjectReferences that would be deleted
+// Resources are validated but not actually removed
 ```
 
 ### Custom Error Handler
@@ -253,8 +254,8 @@ func NewPruner(
 func (p *Pruner) MarkReconciled(obj client.Object) error
 
 // Prune stale resources from previous generations
-// Returns Result with list of pruned/skipped resources
-func (p *Pruner) Prune(ctx context.Context) (*Result, error)
+// Returns list of pruned resources as ObjectReferences
+func (p *Pruner) Prune(ctx context.Context) ([]corev1.ObjectReference, error)
 ```
 
 ### ManagedChild
@@ -265,15 +266,6 @@ type ManagedChild struct {
     ObjectReference corev1.ObjectReference `json:"objectReference"`
     // ObservedGeneration is the parent's generation when this child was last applied
     ObservedGeneration int64 `json:"observedGeneration"`
-}
-```
-
-### Result
-
-```go
-type Result struct {
-    Pruned    []string  `json:"pruned,omitempty"`
-    Skipped   []string  `json:"skipped,omitempty"`
 }
 ```
 
@@ -307,7 +299,7 @@ func TestMyReconciler(t *testing.T) {
     _ = pruner.MarkReconciled(deployment)
     
     // Test pruning behavior
-    result, err := pruner.Prune(context.Background())
+    pruned, err := pruner.Prune(context.Background())
     if err != nil {
         t.Fatal(err)
     }
@@ -315,7 +307,10 @@ func TestMyReconciler(t *testing.T) {
     // Update status
     _ = client.Status().Update(context.Background(), owner)
     
-    // Your assertions here
+    // Check pruned resources
+    if len(pruned) != 0 {
+        t.Errorf("Expected no pruned resources, got %d", len(pruned))
+    }
 }
 ```
 

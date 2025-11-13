@@ -32,14 +32,14 @@ import (
 type Pruner struct {
 	client       client.Client
 	scheme       *runtime.Scheme
-	dryRun       bool
+	deleteOpts   []client.DeleteOption
 	errorHandler ErrorHandlerFunc
 
 	// Reconciliation state
 	owner          client.Object
 	children       *[]ManagedChild
-	desiredRefs    map[string]struct{}
-	result         *Result
+	desiredRefs    map[corev1.ObjectReference]struct{}
+	pruned         []corev1.ObjectReference
 	lastAppliedGen int64
 }
 
@@ -64,8 +64,8 @@ func NewPruner(c client.Client, owner client.Object, children *[]ManagedChild, o
 		errorHandler: defaultErrorHandler,
 		owner:        owner,
 		children:     children,
-		desiredRefs:  make(map[string]struct{}),
-		result:       &Result{},
+		desiredRefs:  make(map[corev1.ObjectReference]struct{}),
+		pruned:       []corev1.ObjectReference{},
 	}
 
 	// Capture the last applied generation BEFORE any modifications
@@ -96,14 +96,13 @@ func (p *Pruner) MarkReconciled(obj client.Object) error {
 	}
 
 	// Generate reference for this object
-	ref, err := p.makeObjectReference(obj)
+	ref, err := reference.GetReference(p.scheme, obj)
 	if err != nil {
 		return fmt.Errorf("failed to generate reference for object: %w", err)
 	}
 
-	// Track as desired using a string key
-	refKey := makeRefKey(*ref)
-	p.desiredRefs[refKey] = struct{}{}
+	// Track as desired
+	p.desiredRefs[*ref] = struct{}{}
 
 	// Update child tracking
 	currentGen := p.owner.GetGeneration()
@@ -123,12 +122,12 @@ func (p *Pruner) MarkReconciled(obj client.Object) error {
 //   - ctx: Context for the operation
 //
 // Returns:
-//   - Result containing lists of pruned/skipped resources
+//   - List of pruned resources as ObjectReferences
 //   - error if the pruning operation fails
 //
 // Example:
 //
-//	result, err := pruner.Prune(ctx)
+//	pruned, err := pruner.Prune(ctx)
 //	if err != nil {
 //	    return ctrl.Result{}, err
 //	}
@@ -136,37 +135,35 @@ func (p *Pruner) MarkReconciled(obj client.Object) error {
 //	if err := r.Status().Update(ctx, &myCR); err != nil {
 //	    return ctrl.Result{}, err
 //	}
-func (p *Pruner) Prune(ctx context.Context) (*Result, error) {
+func (p *Pruner) Prune(ctx context.Context) ([]corev1.ObjectReference, error) {
 	// Get current generation
 	currentGen := p.owner.GetGeneration()
 
 	// Prune resources from previous generation that are no longer desired
 	// Only prune if the spec has changed (currentGen > lastAppliedGen captured in constructor)
 	if currentGen > p.lastAppliedGen {
-		pruneErrors := p.pruneStaleResources(ctx, p.children, p.desiredRefs, p.lastAppliedGen, p.result)
+		pruneErrors := p.pruneStaleResources(ctx, p.children, p.desiredRefs, p.lastAppliedGen)
 		if len(pruneErrors) > 0 {
-			return p.result, errors.Join(pruneErrors...)
+			return p.pruned, errors.Join(pruneErrors...)
 		}
 	}
 
-	return p.result, nil
+	return p.pruned, nil
 }
 
 // pruneStaleResources deletes resources from previous generations that are no longer desired.
 func (p *Pruner) pruneStaleResources(
 	ctx context.Context,
 	children *[]ManagedChild,
-	desiredRefs map[string]struct{},
+	desiredRefs map[corev1.ObjectReference]struct{},
 	lastAppliedGen int64,
-	result *Result,
 ) []error {
 	var pruneErrors []error
 	newChildren := []ManagedChild{}
 
 	for _, child := range *children {
 		// Keep if it's in the desired set
-		childKey := makeRefKey(child.ObjectReference)
-		if _, desired := desiredRefs[childKey]; desired {
+		if _, desired := desiredRefs[child.ObjectReference]; desired {
 			newChildren = append(newChildren, child)
 			continue
 		}
@@ -178,18 +175,11 @@ func (p *Pruner) pruneStaleResources(
 		}
 
 		// This child is from a previous generation and not desired - prune it
-		refStr := formatObjectReference(child.ObjectReference)
-
 		obj := &unstructured.Unstructured{}
 		obj.SetAPIVersion(child.ObjectReference.APIVersion)
 		obj.SetKind(child.ObjectReference.Kind)
 		obj.SetName(child.ObjectReference.Name)
 		obj.SetNamespace(child.ObjectReference.Namespace)
-
-		if p.dryRun {
-			result.Skipped = append(result.Skipped, refStr)
-			continue
-		}
 
 		if err := p.deleteResource(ctx, obj); err != nil {
 			// Call error handler
@@ -200,10 +190,10 @@ func (p *Pruner) pruneStaleResources(
 				newChildren = append(newChildren, child)
 			} else {
 				// Error was ignored by handler, record as pruned
-				result.Pruned = append(result.Pruned, refStr)
+				p.pruned = append(p.pruned, child.ObjectReference)
 			}
 		} else {
-			result.Pruned = append(result.Pruned, refStr)
+			p.pruned = append(p.pruned, child.ObjectReference)
 		}
 	}
 
@@ -213,7 +203,7 @@ func (p *Pruner) pruneStaleResources(
 
 // deleteResource deletes a resource, ignoring NotFound errors.
 func (p *Pruner) deleteResource(ctx context.Context, obj client.Object) error {
-	if err := p.client.Delete(ctx, obj); err != nil {
+	if err := p.client.Delete(ctx, obj, p.deleteOpts...); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil // Already deleted
 		}
@@ -257,26 +247,4 @@ func getLastAppliedGeneration(children []ManagedChild, currentGen int64) int64 {
 	}
 
 	return maxGen
-}
-
-// makeObjectReference creates a corev1.ObjectReference from a client.Object.
-func (p *Pruner) makeObjectReference(obj client.Object) (*corev1.ObjectReference, error) {
-	if p.scheme == nil {
-		return nil, fmt.Errorf("scheme is required but not set")
-	}
-
-	return reference.GetReference(p.scheme, obj)
-}
-
-// makeRefKey creates a unique string key for an ObjectReference.
-func makeRefKey(ref corev1.ObjectReference) string {
-	return fmt.Sprintf("%s/%s/%s/%s", ref.APIVersion, ref.Kind, ref.Namespace, ref.Name)
-}
-
-// formatObjectReference formats an ObjectReference as a string for display.
-func formatObjectReference(ref corev1.ObjectReference) string {
-	if ref.Namespace != "" {
-		return fmt.Sprintf("%s %s/%s", ref.Kind, ref.Namespace, ref.Name)
-	}
-	return fmt.Sprintf("%s %s", ref.Kind, ref.Name)
 }

@@ -31,15 +31,6 @@ type ManagedChild struct {
 	ObservedGeneration int64 `json:"observedGeneration"`
 }
 
-// Result contains information about what was pruned during reconciliation.
-type Result struct {
-	// Pruned is the list of resources that were successfully deleted.
-	Pruned []string `json:"pruned,omitempty"`
-
-	// Skipped is the list of resources that were skipped (e.g., in dry-run mode).
-	Skipped []string `json:"skipped,omitempty"`
-}
-
 // ErrorHandlerFunc is called when an error occurs during pruning operations.
 // It receives the context, the error, and the object being processed.
 // Return nil to ignore the error, or return/wrap the error to fail the operation.

@@ -37,16 +37,18 @@ func WithScheme(scheme *runtime.Scheme) Option {
 	}
 }
 
-// WithDryRun enables dry-run mode where no actual changes are made.
-// Resources that would be pruned are returned in the Result but not deleted.
-// Resources are still "applied" in dry-run mode to validate configurations.
+// WithDryRun enables dry-run mode where delete operations are simulated.
+// Uses Kubernetes dry-run to validate deletions without actually removing resources.
+// Resources that would be pruned are returned in the Result.
 //
 // Example:
 //
 //	pruner := NewPruner(client, WithDryRun(true))
 func WithDryRun(dryRun bool) Option {
 	return func(p *Pruner) {
-		p.dryRun = dryRun
+		if dryRun {
+			p.deleteOpts = []client.DeleteOption{client.DryRunAll}
+		}
 	}
 }
 
