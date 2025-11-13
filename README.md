@@ -32,7 +32,7 @@ go get github.com/guilhem/reconcileprune
 ```go
 type MyCustomResourceStatus struct {
     // Children tracks all managed child resources
-    Children []reconcileprune.ManagedChild `json:"children,omitempty"`
+    Children reconcileprune.ManagedChildrenList `json:"children,omitempty"`
 }
 ```
 
@@ -242,7 +242,7 @@ type Pruner struct {
 func NewPruner(
     client client.Client,
     owner client.Object,
-    children *[]ManagedChild,
+    statusChildren *ManagedChildrenList,
     opts ...Option,
 ) *Pruner
 
@@ -263,6 +263,9 @@ type ManagedChild struct {
     // ObservedGeneration is the parent's generation when this child was last applied
     ObservedGeneration int64 `json:"observedGeneration"`
 }
+
+// ManagedChildrenList is a list of managed child resources
+type ManagedChildrenList []ManagedChild
 ```
 
 ## Testing

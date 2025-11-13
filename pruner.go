@@ -37,7 +37,7 @@ type Pruner struct {
 
 	// Reconciliation state
 	owner          client.Object
-	children       *[]ManagedChild
+	statusChildren *ManagedChildrenList
 	desiredRefs    map[corev1.ObjectReference]struct{}
 	pruned         []corev1.ObjectReference
 	lastAppliedGen int64
@@ -49,7 +49,7 @@ type Pruner struct {
 // Parameters:
 //   - c: The Kubernetes client
 //   - owner: The parent Custom Resource that owns the children
-//   - children: Pointer to the slice of ManagedChild in the owner's status
+//   - statusChildren: Pointer to the ManagedChildrenList in the owner's status
 //   - opts: Optional configuration options
 //
 // Example:
@@ -58,19 +58,19 @@ type Pruner struct {
 //	    reconcileprune.WithFieldOwner("my-controller"),
 //	    reconcileprune.WithScheme(r.Scheme),
 //	)
-func NewPruner(c client.Client, owner client.Object, children *[]ManagedChild, opts ...Option) *Pruner {
+func NewPruner(c client.Client, owner client.Object, statusChildren *ManagedChildrenList, opts ...Option) *Pruner {
 	p := &Pruner{
-		client:       c,
-		errorHandler: defaultErrorHandler,
-		owner:        owner,
-		children:     children,
-		desiredRefs:  make(map[corev1.ObjectReference]struct{}),
-		pruned:       []corev1.ObjectReference{},
+		client:         c,
+		errorHandler:   defaultErrorHandler,
+		owner:          owner,
+		statusChildren: statusChildren,
+		desiredRefs:    make(map[corev1.ObjectReference]struct{}),
+		pruned:         []corev1.ObjectReference{},
 	}
 
 	// Capture the last applied generation BEFORE any modifications
 	currentGen := owner.GetGeneration()
-	p.lastAppliedGen = getLastAppliedGeneration(*children, currentGen)
+	p.lastAppliedGen = getLastAppliedGeneration(*statusChildren, currentGen)
 
 	for _, opt := range opts {
 		opt(p)
@@ -106,7 +106,7 @@ func (p *Pruner) MarkReconciled(obj client.Object) error {
 
 	// Update child tracking
 	currentGen := p.owner.GetGeneration()
-	p.upsertChild(p.children, *ref, currentGen)
+	p.upsertChild(p.statusChildren, *ref, currentGen)
 
 	return nil
 }
@@ -142,7 +142,7 @@ func (p *Pruner) Prune(ctx context.Context) ([]corev1.ObjectReference, error) {
 	// Prune resources from previous generation that are no longer desired
 	// Only prune if the spec has changed (currentGen > lastAppliedGen captured in constructor)
 	if currentGen > p.lastAppliedGen {
-		pruneErrors := p.pruneStaleResources(ctx, p.children, p.desiredRefs, p.lastAppliedGen)
+		pruneErrors := p.pruneStaleResources(ctx, p.statusChildren, p.desiredRefs, p.lastAppliedGen)
 		if len(pruneErrors) > 0 {
 			return p.pruned, errors.Join(pruneErrors...)
 		}
@@ -154,14 +154,14 @@ func (p *Pruner) Prune(ctx context.Context) ([]corev1.ObjectReference, error) {
 // pruneStaleResources deletes resources from previous generations that are no longer desired.
 func (p *Pruner) pruneStaleResources(
 	ctx context.Context,
-	children *[]ManagedChild,
+	statusChildren *ManagedChildrenList,
 	desiredRefs map[corev1.ObjectReference]struct{},
 	lastAppliedGen int64,
 ) []error {
 	var pruneErrors []error
-	newChildren := []ManagedChild{}
+	newChildren := ManagedChildrenList{}
 
-	for _, child := range *children {
+	for _, child := range *statusChildren {
 		// Keep if it's in the desired set
 		if _, desired := desiredRefs[child.ObjectReference]; desired {
 			newChildren = append(newChildren, child)
@@ -197,7 +197,7 @@ func (p *Pruner) pruneStaleResources(
 		}
 	}
 
-	*children = newChildren
+	*statusChildren = newChildren
 	return pruneErrors
 }
 
@@ -213,14 +213,14 @@ func (p *Pruner) deleteResource(ctx context.Context, obj client.Object) error {
 }
 
 // upsertChild updates or adds a child to the children list.
-func (p *Pruner) upsertChild(children *[]ManagedChild, ref corev1.ObjectReference, observedGeneration int64) {
-	for i := range *children {
-		if (*children)[i].ObjectReference == ref {
-			(*children)[i].ObservedGeneration = observedGeneration
+func (p *Pruner) upsertChild(statusChildren *ManagedChildrenList, ref corev1.ObjectReference, observedGeneration int64) {
+	for i := range *statusChildren {
+		if (*statusChildren)[i].ObjectReference == ref {
+			(*statusChildren)[i].ObservedGeneration = observedGeneration
 			return
 		}
 	}
-	*children = append(*children, ManagedChild{
+	*statusChildren = append(*statusChildren, ManagedChild{
 		ObjectReference:    ref,
 		ObservedGeneration: observedGeneration,
 	})
@@ -229,7 +229,7 @@ func (p *Pruner) upsertChild(children *[]ManagedChild, ref corev1.ObjectReferenc
 // getLastAppliedGeneration returns the maximum ObservedGeneration from children.
 // If all children have the current generation, returns currentGen.
 // Otherwise returns the highest generation found.
-func getLastAppliedGeneration(children []ManagedChild, currentGen int64) int64 {
+func getLastAppliedGeneration(children ManagedChildrenList, currentGen int64) int64 {
 	if len(children) == 0 {
 		return 0
 	}

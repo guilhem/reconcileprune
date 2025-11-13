@@ -53,7 +53,7 @@ func (t *TestCR) DeepCopyInto(out *TestCR) {
 	t.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
 	out.Spec = t.Spec
 	if t.Status.Children != nil {
-		out.Status.Children = make([]ManagedChild, len(t.Status.Children))
+		out.Status.Children = make(ManagedChildrenList, len(t.Status.Children))
 		copy(out.Status.Children, t.Status.Children)
 	}
 }
@@ -61,7 +61,7 @@ func (t *TestCR) DeepCopyInto(out *TestCR) {
 type TestCRSpec struct{}
 
 type TestCRStatus struct {
-	Children []ManagedChild `json:"children,omitempty"`
+	Children ManagedChildrenList `json:"children,omitempty"`
 }
 
 func setupScheme() *runtime.Scheme {

@@ -54,7 +54,7 @@ func (m *MyCR) DeepCopyInto(out *MyCR) {
 	m.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
 	out.Spec = m.Spec
 	if m.Status.Children != nil {
-		out.Status.Children = make([]reconcileprune.ManagedChild, len(m.Status.Children))
+		out.Status.Children = make(reconcileprune.ManagedChildrenList, len(m.Status.Children))
 		copy(out.Status.Children, m.Status.Children)
 	}
 }
@@ -64,7 +64,7 @@ type MyCRSpec struct {
 }
 
 type MyCRStatus struct {
-	Children []reconcileprune.ManagedChild `json:"children,omitempty"`
+	Children reconcileprune.ManagedChildrenList `json:"children,omitempty"`
 }
 
 func ExamplePruner_MarkReconciled() {

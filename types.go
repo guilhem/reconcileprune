@@ -31,6 +31,10 @@ type ManagedChild struct {
 	ObservedGeneration int64 `json:"observedGeneration"`
 }
 
+// ManagedChildrenList is a list of managed child resources.
+// This type alias is used to clarify the purpose of the children slice in the Pruner.
+type ManagedChildrenList []ManagedChild
+
 // ErrorHandlerFunc is called when an error occurs during pruning operations.
 // It receives the context, the error, and the object being processed.
 // Return nil to ignore the error, or return/wrap the error to fail the operation.
