@@ -127,52 +127,48 @@ func (r *MyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 
 ### Generation-Based Pruning Flow
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Spec Generation 1                                           │
-├─────────────────────────────────────────────────────────────┤
-│ Desired: [Deployment-A, Service-A]                          │
-│                                                              │
-│ → User applies Deployment-A                                 │
-│ → MarkReconciled(Deployment-A) → ObservedGeneration=1      │
-│ → User applies Service-A                                    │
-│ → MarkReconciled(Service-A) → ObservedGeneration=1         │
-│ → No pruning (first reconcile)                              │
-│                                                              │
-│ Status.Children:                                            │
-│   - Deployment-A (ObservedGeneration=1)                     │
-│   - Service-A (ObservedGeneration=1)                        │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+sequenceDiagram
+    participant User
+    participant Reconciler
+    participant Pruner
+    participant Status
 
-┌─────────────────────────────────────────────────────────────┐
-│ Spec Generation 2 (User modifies spec)                     │
-├─────────────────────────────────────────────────────────────┤
-│ Desired: [Deployment-B, Service-A]                          │
-│                                                              │
-│ → User applies Deployment-B                                 │
-│ → MarkReconciled(Deployment-B) → ObservedGeneration=2      │
-│ → User applies Service-A                                    │
-│ → MarkReconciled(Service-A) → ObservedGeneration=2         │
-│ → Prune Deployment-A (ObservedGeneration=1, not marked)    │
-│                                                              │
-│ Status.Children:                                            │
-│   - Deployment-B (ObservedGeneration=2)                     │
-│   - Service-A (ObservedGeneration=2)                        │
-└─────────────────────────────────────────────────────────────┘
+    Note over User,Status: Spec Generation 1
+    User->>Reconciler: Desired: [Deployment-A, Service-A]
+    Reconciler->>Reconciler: Apply Deployment-A
+    Reconciler->>Pruner: MarkReconciled(Deployment-A)
+    Pruner->>Status: ObservedGeneration=1
+    Reconciler->>Reconciler: Apply Service-A
+    Reconciler->>Pruner: MarkReconciled(Service-A)
+    Pruner->>Status: ObservedGeneration=1
+    Reconciler->>Pruner: Prune()
+    Note over Pruner: No pruning (first reconcile)
+    Note over Status: Children:<br/>- Deployment-A (Gen=1)<br/>- Service-A (Gen=1)
 
-┌─────────────────────────────────────────────────────────────┐
-│ Spec Generation 2 (Redundant reconcile, no spec change)    │
-├─────────────────────────────────────────────────────────────┤
-│ Desired: [Deployment-B, Service-A]                          │
-│                                                              │
-│ → User applies Deployment-B                                 │
-│ → MarkReconciled(Deployment-B) → ObservedGeneration=2      │
-│ → User applies Service-A                                    │
-│ → MarkReconciled(Service-A) → ObservedGeneration=2         │
-│ → NO pruning (currentGen == lastAppliedGen)                 │
-│                                                              │
-│ Status.Children: unchanged                                  │
-└─────────────────────────────────────────────────────────────┘
+    Note over User,Status: Spec Generation 2 (User modifies spec)
+    User->>Reconciler: Desired: [Deployment-B, Service-A]
+    Reconciler->>Reconciler: Apply Deployment-B
+    Reconciler->>Pruner: MarkReconciled(Deployment-B)
+    Pruner->>Status: ObservedGeneration=2
+    Reconciler->>Reconciler: Apply Service-A
+    Reconciler->>Pruner: MarkReconciled(Service-A)
+    Pruner->>Status: ObservedGeneration=2
+    Reconciler->>Pruner: Prune()
+    Pruner->>Pruner: Delete Deployment-A (Gen=1, not marked)
+    Note over Status: Children:<br/>- Deployment-B (Gen=2)<br/>- Service-A (Gen=2)
+
+    Note over User,Status: Spec Generation 2 (Redundant reconcile)
+    User->>Reconciler: Desired: [Deployment-B, Service-A]
+    Reconciler->>Reconciler: Apply Deployment-B
+    Reconciler->>Pruner: MarkReconciled(Deployment-B)
+    Pruner->>Status: ObservedGeneration=2
+    Reconciler->>Reconciler: Apply Service-A
+    Reconciler->>Pruner: MarkReconciled(Service-A)
+    Pruner->>Status: ObservedGeneration=2
+    Reconciler->>Pruner: Prune()
+    Note over Pruner: NO pruning (currentGen == lastAppliedGen)
+    Note over Status: Children: unchanged
 ```
 
 ### Key Rules
