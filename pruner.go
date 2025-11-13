@@ -21,8 +21,9 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/tools/reference"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -101,12 +102,12 @@ func (p *Pruner) MarkReconciled(obj client.Object) error {
 	}
 
 	// Track as desired using a string key
-	refKey := makeRefKey(ref)
+	refKey := makeRefKey(*ref)
 	p.desiredRefs[refKey] = struct{}{}
 
 	// Update child tracking
 	currentGen := p.owner.GetGeneration()
-	p.upsertChild(p.children, ref, currentGen)
+	p.upsertChild(p.children, *ref, currentGen)
 
 	return nil
 }
@@ -177,14 +178,14 @@ func (p *Pruner) pruneStaleResources(
 		}
 
 		// This child is from a previous generation and not desired - prune it
-		obj, err := p.objectFromReference(child.ObjectReference)
-		if err != nil {
-			refStr := formatObjectReference(child.ObjectReference)
-			pruneErrors = append(pruneErrors, fmt.Errorf("failed to create object from reference %s: %w", refStr, err))
-			continue
-		}
-
 		refStr := formatObjectReference(child.ObjectReference)
+
+		obj := &unstructured.Unstructured{}
+		obj.SetAPIVersion(child.ObjectReference.APIVersion)
+		obj.SetKind(child.ObjectReference.Kind)
+		obj.SetName(child.ObjectReference.Name)
+		obj.SetNamespace(child.ObjectReference.Namespace)
+
 		if p.dryRun {
 			result.Skipped = append(result.Skipped, refStr)
 			continue
@@ -229,7 +230,6 @@ func (p *Pruner) upsertChild(children *[]ManagedChild, ref corev1.ObjectReferenc
 			return
 		}
 	}
-	// Not found, add new
 	*children = append(*children, ManagedChild{
 		ObjectReference:    ref,
 		ObservedGeneration: observedGeneration,
@@ -260,50 +260,12 @@ func getLastAppliedGeneration(children []ManagedChild, currentGen int64) int64 {
 }
 
 // makeObjectReference creates a corev1.ObjectReference from a client.Object.
-func (p *Pruner) makeObjectReference(obj client.Object) (corev1.ObjectReference, error) {
-	gvk, err := p.getGVK(obj)
-	if err != nil {
-		return corev1.ObjectReference{}, err
+func (p *Pruner) makeObjectReference(obj client.Object) (*corev1.ObjectReference, error) {
+	if p.scheme == nil {
+		return nil, fmt.Errorf("scheme is required but not set")
 	}
 
-	return corev1.ObjectReference{
-		APIVersion: gvk.GroupVersion().String(),
-		Kind:       gvk.Kind,
-		Namespace:  obj.GetNamespace(),
-		Name:       obj.GetName(),
-		UID:        obj.GetUID(),
-	}, nil
-}
-
-// objectFromReference creates a client.Object from a corev1.ObjectReference.
-func (p *Pruner) objectFromReference(ref corev1.ObjectReference) (client.Object, error) {
-	// Parse APIVersion to get GVK
-	gv, err := schema.ParseGroupVersion(ref.APIVersion)
-	if err != nil {
-		return nil, fmt.Errorf("invalid APIVersion in reference: %w", err)
-	}
-
-	gvk := schema.GroupVersionKind{
-		Group:   gv.Group,
-		Version: gv.Version,
-		Kind:    ref.Kind,
-	}
-
-	// Create an object using the scheme
-	obj, err := p.scheme.New(gvk)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create object for GVK %s: %w", gvk, err)
-	}
-
-	clientObj, ok := obj.(client.Object)
-	if !ok {
-		return nil, fmt.Errorf("object does not implement client.Object")
-	}
-
-	clientObj.SetName(ref.Name)
-	clientObj.SetNamespace(ref.Namespace)
-
-	return clientObj, nil
+	return reference.GetReference(p.scheme, obj)
 }
 
 // makeRefKey creates a unique string key for an ObjectReference.
@@ -317,22 +279,4 @@ func formatObjectReference(ref corev1.ObjectReference) string {
 		return fmt.Sprintf("%s %s/%s", ref.Kind, ref.Namespace, ref.Name)
 	}
 	return fmt.Sprintf("%s %s", ref.Kind, ref.Name)
-}
-
-// getGVK returns the GroupVersionKind for an object.
-func (p *Pruner) getGVK(obj client.Object) (schema.GroupVersionKind, error) {
-	if p.scheme == nil {
-		return schema.GroupVersionKind{}, fmt.Errorf("scheme is required but not set")
-	}
-
-	gvks, _, err := p.scheme.ObjectKinds(obj)
-	if err != nil {
-		return schema.GroupVersionKind{}, fmt.Errorf("failed to get GVK: %w", err)
-	}
-
-	if len(gvks) == 0 {
-		return schema.GroupVersionKind{}, fmt.Errorf("no GVK found for object")
-	}
-
-	return gvks[0], nil
 }
